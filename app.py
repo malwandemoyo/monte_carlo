@@ -32,7 +32,7 @@ def kalman_filter(observed, x=None, delta=1e-4, R=0.01, initial_beta=0, initial_
 
 # ——— Dashboard plotting ———
 def plot_dashboard(weekly_df, price_paths, revenue_paths=None, kalman_data=None, revenue_metrics=None,
-                   freq="W-FRI", price_unit="USD/OZ", revenue_unit="USD", kalman_delta=0.0001):
+                   freq="W-FRI", price_unit="USD/kg", revenue_unit="USD", kalman_delta=0.0001):
     last_date = pd.to_datetime(weekly_df["Date"].iloc[-1])
     periods = price_paths.shape[0] - 1
     dates = pd.date_range(last_date + timedelta(weeks=1), periods=periods, freq=freq)
@@ -217,19 +217,22 @@ st.sidebar.subheader("Revenue Simulation")
 volume = st.sidebar.number_input("Volume (units)", min_value=1, value=1000)
 show_revenue = st.sidebar.checkbox("Show Revenue Forecast", value=True)
 
-# Prepare returns
+# Prepare returns - FIXED: Compute log returns AFTER date filtering
 df["LogReturn"] = np.log(df["Price"] / df["Price"].shift(1))
 rets = df["LogReturn"].dropna().values
 
-# Kalman filter with adjustable parameters
+# Kalman filter with adjustable parameters - FIXED: Align with original DataFrame
 beta_hat, P_t, e_t = kalman_filter(rets, R=kalman_R, delta=kalman_delta)
-df = df.iloc[1:]
-df["HedgeRatio"] = beta_hat
-df["Pt"] = P_t
-df["e_t"] = e_t
+
+# FIXED: Properly align Kalman results with DataFrame
+# We have 1 less observation for Kalman results than original df
+kalman_df = df.iloc[1:].copy()
+kalman_df["HedgeRatio"] = beta_hat
+kalman_df["Pt"] = P_t
+kalman_df["e_t"] = e_t
 
 # Monte Carlo
-last_price = df["Price"].iloc[-1]
+last_price = kalman_df["Price"].iloc[-1]  # Use last price from Kalman-aligned DF
 paths = np.zeros((horizon + 1, n_sims))
 paths[0] = last_price
 mu, sigma = rets.mean(), rets.std()
@@ -263,9 +266,9 @@ if show_revenue:
         "EffectiveVolume": dynamic_volume
     }
 
-# Plot
+# Plot using Kalman-aligned dataframe
 fig = plot_dashboard(
-    weekly_df=df,
+    weekly_df=kalman_df,  # Use Kalman-aligned DF for plotting
     price_paths=price_paths,
     revenue_paths=revenue_paths,
     kalman_data={"beta": beta_hat, "Pt": P_t, "e_t": e_t},
@@ -274,12 +277,12 @@ fig = plot_dashboard(
 )
 st.pyplot(fig)
 
-# Display raw data
+# Display raw data - FIXED: Use Kalman-aligned dataframe
 st.subheader("Filtered Data Preview")
 col1, col2 = st.columns(2)
 with col1:
     st.write("**Price & Hedge Ratio Data**")
-    st.dataframe(df[["Date", "Price", "HedgeRatio", "Pt", "e_t"]].tail(10))
+    st.dataframe(kalman_df[["Date", "Price", "HedgeRatio", "Pt", "e_t"]].tail(10))
 
 # Kalman metrics summary
 st.subheader("Hedge Ratio Metrics")
@@ -293,9 +296,9 @@ kalman_metrics = {
 metrics_df = pd.DataFrame(list(kalman_metrics.items()), columns=["Metric", "Value"])
 st.dataframe(metrics_df.style.format({"Value": "{:.6f}"}))
 
-# Download buttons
+# Download buttons - FIXED: Use Kalman-aligned dataframe
 st.subheader("Data Export")
-csv1 = df[["Date", "Price", "HedgeRatio", "Pt", "e_t"]].to_csv(index=False)
+csv1 = kalman_df[["Date", "Price", "HedgeRatio", "Pt", "e_t"]].to_csv(index=False)  # Kalman results
 csv2 = price_paths.transpose().to_csv()  # Simulation paths
 
 col1, col2 = st.columns(2)
