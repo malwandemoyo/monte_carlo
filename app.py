@@ -51,8 +51,6 @@ def plot_dashboard(weekly_df, price_paths, revenue_paths=None, kalman_data=None,
         "Current Variance (P_t)": P_t[-1],
         "Error Mean": np.mean(e_t_clean),
         "Error Std": np.std(e_t_clean),
-        "Error Skewness": skew(e_t_clean),
-        "Error Kurtosis": kurtosis(e_t_clean, fisher=False)
     }
 
     final_prices = price_paths.iloc[-1].values
@@ -290,8 +288,6 @@ kalman_metrics = {
     "Hedge Ratio Stability": P_t[-1],
     "Error Mean": np.mean(e_t[1:]),
     "Error Std Dev": np.std(e_t[1:]),
-    "Error Skewness": skew(e_t[1:]),
-    "Error Kurtosis": kurtosis(e_t[1:], fisher=False)
 }
 
 metrics_df = pd.DataFrame(list(kalman_metrics.items()), columns=["Metric", "Value"])
