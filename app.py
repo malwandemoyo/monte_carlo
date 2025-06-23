@@ -32,7 +32,7 @@ def kalman_filter(observed, x=None, delta=1e-4, R=0.01, initial_beta=0, initial_
 
 # ——— Dashboard plotting ———
 def plot_dashboard(weekly_df, price_paths, revenue_paths=None, kalman_data=None, revenue_metrics=None,
-                   freq="W-FRI", price_unit="USD/kg", revenue_unit="USD"):
+                   freq="W-FRI", price_unit="USD/OZ", revenue_unit="USD", kalman_delta=0.0001):
     last_date = pd.to_datetime(weekly_df["Date"].iloc[-1])
     periods = price_paths.shape[0] - 1
     dates = pd.date_range(last_date + timedelta(weeks=1), periods=periods, freq=freq)
@@ -45,16 +45,14 @@ def plot_dashboard(weekly_df, price_paths, revenue_paths=None, kalman_data=None,
     # Clean errors (skip first element)
     e_t_clean = e_t[1:]
     
-    # Kalman metrics
+    # Simplified Kalman metrics (without VaR/CVaR)
     kalman_metrics = {
         "Current Hedge Ratio": beta_hat[-1],
         "Current Variance (P_t)": P_t[-1],
         "Error Mean": np.mean(e_t_clean),
         "Error Std": np.std(e_t_clean),
         "Error Skewness": skew(e_t_clean),
-        "Error Kurtosis": kurtosis(e_t_clean, fisher=False),
-        "Error VaR (95%)": -np.percentile(e_t_clean, 5),
-        "Error CVaR (95%)": -np.mean(e_t_clean[e_t_clean <= np.percentile(e_t_clean, 5)])
+        "Error Kurtosis": kurtosis(e_t_clean, fisher=False)
     }
 
     final_prices = price_paths.iloc[-1].values
@@ -71,6 +69,24 @@ def plot_dashboard(weekly_df, price_paths, revenue_paths=None, kalman_data=None,
     fig = plt.figure(figsize=(18, 14))
     gs = fig.add_gridspec(3, 2, height_ratios=[2, 2, 1])
 
+    # ——— Kalman Projection ———
+    n_projection = len(dates)
+    if n_projection > 0:
+        last_beta = beta_hat[-1]
+        last_P = P_t[-1]
+        
+        # Project with increasing uncertainty
+        projected_beta = np.full(n_projection, last_beta)
+        projected_Pt = last_P + kalman_delta * np.arange(1, n_projection + 1)
+    else:
+        projected_beta = np.array([])
+        projected_Pt = np.array([])
+
+    # Combine historical and projected
+    full_dates = np.concatenate([weekly_df["Date"], dates])
+    full_beta = np.concatenate([beta_hat, projected_beta])
+    full_Pt = np.concatenate([P_t, projected_Pt])
+
     # Price paths
     ax1 = fig.add_subplot(gs[0, 0])
     ax1.plot(weekly_df["Date"], weekly_df["Price"], label="Historical", color="#1f77b4")
@@ -81,16 +97,25 @@ def plot_dashboard(weekly_df, price_paths, revenue_paths=None, kalman_data=None,
     ax1.set_title("Gold Price Forecast")
     ax1.set_ylabel(f"Price ({price_unit})")
 
-    # Hedge ratio evolution
+    # Hedge ratio evolution with projection
     ax2 = fig.add_subplot(gs[0, 1])
-    ax2.plot(weekly_df["Date"], beta_hat, label="Hedge Ratio", color="purple")
+    # Historical
+    ax2.plot(weekly_df["Date"], beta_hat, label="Historical Hedge Ratio", color="purple")
     ax2.fill_between(weekly_df["Date"], 
                      beta_hat - 2*np.sqrt(P_t), 
                      beta_hat + 2*np.sqrt(P_t), 
                      alpha=0.2, color="purple")
-    ax2.axhline(1.0, color='red', linestyle='--', alpha=0.5)
+    # Projection
+    if n_projection > 0:
+        ax2.plot(dates, projected_beta, ':', label="Projected Hedge Ratio", color="red")
+        ax2.fill_between(dates, 
+                         projected_beta - 2*np.sqrt(projected_Pt), 
+                         projected_beta + 2*np.sqrt(projected_Pt), 
+                         alpha=0.1, color="red")
+    
+    ax2.axhline(1.0, color='black', linestyle='--', alpha=0.5)
     ax2.legend()
-    ax2.set_title("Hedge Ratio Evolution with 95% Confidence Band")
+    ax2.set_title("Hedge Ratio Evolution with Projection")
     ax2.set_ylabel("Beta")
 
     # Final price distribution
@@ -246,7 +271,8 @@ fig = plot_dashboard(
     price_paths=price_paths,
     revenue_paths=revenue_paths,
     kalman_data={"beta": beta_hat, "Pt": P_t, "e_t": e_t},
-    revenue_metrics=revenue_metrics
+    revenue_metrics=revenue_metrics,
+    kalman_delta=kalman_delta  # Pass delta for projection
 )
 st.pyplot(fig)
 
